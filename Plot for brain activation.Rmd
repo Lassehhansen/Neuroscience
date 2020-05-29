@@ -1,0 +1,61 @@
+---
+title: "Plots for brain activation"
+author: "Lasse Hansen"
+date: "5/29/2020"
+output: html_document
+---
+
+```{r}
+library(reshape)
+jesp <- read_xlsx("allall.xlsx")
+jesp <- as.data.frame(jesp)
+```
+
+```{r}
+jesp$arealong <- ifelse(jesp$area == "all", "left IFG",
+                       ifelse(jesp$area == "all", "left IFG",
+                       ifelse(jesp$area == "oper", "pars opercularis",
+                       ifelse(jesp$area == "oper", "pars opercularis",
+                       ifelse(jesp$area == "orb", "pars orbitalis",
+                       ifelse(jesp$area == "orb", "pars orbitalis",
+                       ifelse(jesp$area == "tri", "pars triangularis",
+                       ifelse(jesp$area == "tri", "pars triangularis",
+                       ifelse(jesp$area == "pre", "precuneus", "1")))))))))
+
+jesp$variable <- ifelse(jesp$area == "all" & jesp$Concrete == 0, "Abstract Concepts for LIFG",
+                       ifelse(jesp$area == "all" & jesp$Concrete == 1, "Concrete Concepts for LIFG",
+                       ifelse(jesp$area == "oper" & jesp$Concrete == 0, "Abstract Concepts for p. opercularis",
+                       ifelse(jesp$area == "oper" & jesp$Concrete == 1, "Concrete Concepts for p. opercularis",
+                       ifelse(jesp$area == "orb" & jesp$Concrete == 0, "Abstract Concepts for p. orbitalis",
+                       ifelse(jesp$area == "orb" & jesp$Concrete == 1, "Concrete Concepts for p. orbitalis",
+                       ifelse(jesp$area == "tri" & jesp$Concrete == 0, "Abstract Concepts for p. triangularis",
+                       ifelse(jesp$area == "tri" & jesp$Concrete == 1, "Concrete Concepts for p. triangularis",
+                       ifelse(jesp$area == "pre" & jesp$Concrete == 0, "Abstract Concepts for precuneus",
+                       ifelse(jesp$area == "pre" & jesp$Concrete == 1, "Concrete Concepts for precuneus","1"))))))))))
+```
+
+```{r}
+jesp$Concrete <- as.factor(jesp$Concrete)
+
+jesp$Concrete <- ifelse(jesp$Concrete == 0, "Abstract", "Concrete")
+```
+
+
+```{r leveling variables}
+
+jesp$variable <- factor(jesp$variable, 
+              levels = c("Abstract Concepts for LIFG", "Concrete Concepts for LIFG", "Abstract Concepts for p. opercularis", "Concrete Concepts for p. opercularis", "Abstract Concepts for p. orbitalis", "event", "Concrete Concepts for p. orbitalis", "Abstract Concepts for p. triangularis", "Concrete Concepts for p. triangularis", "Abstract Concepts for precuneus", "Concrete Concepts for precuneus"))
+```
+
+```{r plot}
+ggplot(jesp, aes(variable, Value, colour = Concrete, fill = Concrete)) +
+  geom_bar(stat = 'summary', fun.y = mean, width = 0.3) + 
+  geom_errorbar(stat = 'summary', fun.data = mean_se, width = 0.1, colour = 'black') + 
+    labs(y = "Average Percent Signal Change") + labs(x = "Brain area") +
+    labs(title = "Activation for brain structures in the left- IFG and precuneus") + 
+    rotate_x_text() + 
+    facet_grid(~jesp$arealong, scales = "free_x") + 
+    theme(axis.text.x = element_blank(), legend.title = element_blank(), strip.text.x = element_text(vjust = 0)) 
+```
+
+
