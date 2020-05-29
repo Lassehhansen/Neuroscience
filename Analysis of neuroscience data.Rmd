@@ -1,0 +1,288 @@
+---
+title: "NeuroExam"
+author: "Lasse Hansen"
+date: "5/29/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r loading packages}
+library(tidyverse)
+library(fs)
+library(lubridate)
+library(lme4)
+library(ggplot2)
+library(ggpubr)
+library(nlme)
+pacman::p_load(readxl, nlme)
+pacman::p_load(birdnik)
+```
+
+```{r loading PCA databases}
+data <- read_excel("WordSet1_Ratings.xlsx")
+
+data$Concrete <- ifelse(data$`Super Category` == "abstract action", 0,
+                         ifelse(data$`Super Category` == "abstract entity", 0,
+                         ifelse(data$`Super Category` == "abstract property", 0,
+                         ifelse(data$`Super Category` == "artifact", 1,
+                         ifelse(data$`Super Category` == "event", 1,
+                         ifelse(data$`Super Category` == "living object", 1,
+                         ifelse(data$`Super Category` == "mental entity", 0,
+                         ifelse(data$`Super Category` == "mental state", 0,
+                         ifelse(data$`Super Category` == "natural object", 1,
+                         ifelse(data$`Super Category` == "physical action", 1,
+                         ifelse(data$`Super Category` == "physical property", 1,
+                         ifelse(data$`Super Category` == "physical state", 1, ""))))))))))))
+
+data$Category <- as.factor(data$Category)
+```
+
+### Helper functions
+```{r loading helper functions}
+extract_time_from_filename <- function(filename) {
+  # Get time within parentheses using regex-voodoo
+  time_string <- str_extract(filename, "(?<=\\().+?(?=\\))")
+  # return the timestamp as time-datatype
+  lubridate::ymd_hms(time_string)
+}
+
+# Reads the file and adds the timestamp
+read_exp_files <- function(file_path) {
+  temp_df <- read_csv(file_path, col_types = cols(.default = "c"))
+  temp_df %>% mutate(time_stamp = extract_time_from_filename(file_path))
+}
+
+
+is_numeric_character <- function(x) {
+  !any(is.na(suppressWarnings(as.numeric(x)))) & is.character(x)
+}
+
+# Returns time of day in decimal-hour format
+time_of_day <- function(date_vec) {
+  hour(date_vec) + minute(date_vec)/60 + second(date_vec)/3600
+}
+
+
+```
+
+# Load data
+```{r loading data}
+#################
+# Get all files #
+#################
+# Put the files from the old semester in a folder called "old_data" in your working directory (or change the path below)
+old_files <- dir_ls(path="faceWord_exp_data_old", glob="*csv")
+# Same for the new files (our year) :-)
+new_files <- dir_ls(path="faceWord_exp_data_2020", glob="*csv")
+
+df_old <- old_files %>% 
+  map_dfr(read_exp_files)
+df_new <- new_files %>% 
+  map_dfr(read_exp_files)
+
+################
+# Joining data #
+################
+common_col_names <- intersect(colnames(df_old), colnames(df_new))
+WordFace <- df_old %>% 
+  select(common_col_names) %>% 
+  bind_rows(select(df_new, common_col_names))
+
+#####################
+# Fixing data types #
+#####################
+WordFace <- WordFace %>% 
+  mutate(rt = as.numeric(rt)) %>% 
+  # Making all the numeric columns numeric
+  mutate_if(sapply(., is_numeric_character), as.numeric)
+
+##########################
+# mutating and filtering #
+##########################
+WordFace <- WordFace %>% 
+  filter(correct_resp == 1) %>% 
+  # Filtering away Nina's shenanigans
+  filter(!(ID %in% c('holymolly', 'owl', 'pjh', 'roo', 'yogafrogen', 'vicedor'))) %>% 
+  # Creating lag-columns ("one-back" in original)
+  mutate(imgN1 = lag(img), 
+         word_labelN1 = lag(word_label),
+         word_score_pcN1 = lag(word_score_pc)) %>% 
+  # Create time of day in a cleaner way (yay!)
+  mutate(time = time_of_day(time_stamp+onset_img)) %>% 
+  #Principal components come with unpredictable sign. Here Positive has become negeative, so we reverse
+  mutate(word_score_pc = -word_score_pc, 
+         word_score_pcN1 = -word_score_pcN1) %>% 
+  #Percentage accurcay in session
+  mutate(correct = sum(correct_resp == 1)/60)
+### Scaling ### 
+  
+#scale pc score for analysis
+WordFace$word_score_pc_sc <- scale(WordFace$word_score_pc)
+#Square for analysis
+WordFace$word_score_pc_sq <-WordFace$word_score_pc_sc^2
+#scale pc score at time -1 for analysis
+WordFace$word_score_pcN1_sc <- scale(WordFace$word_score_pcN1)
+#Square for analysis
+WordFace$word_score_pcN1_sq <-WordFace$word_score_pcN1_sc^2
+#scale time of day for analysis
+WordFace$time_sc <- scale(WordFace$time)
+#Square for analysis
+WordFace$time_sq <- scale(WordFace$time)^2
+#scale trial number for analysis
+WordFace$no_sc<-scale(WordFace$no)
+#Scale pause duration for analysis
+WordFace$delay_frames_before_sc<-scale(WordFace$delay_frames_before)
+```
+
+```{r Ruling out rt outliers}
+WordFace <- subset(WordFace, rt > 0.2) #removing negative reaction times
+WordFace$z_score <- (WordFace$rt-mean(WordFace$rt))/sd(WordFace$rt)
+WordFace <- subset(WordFace, z_score < 3 & z_score > -3)
+
+```
+
+```{r merging dataframe with binder data}
+names(data)[2] <- "word"
+merge <- merge(WordFace, data, by = "word")
+```
+
+```{r}
+names(merge)[116] <- "lq_freq"
+merge$img <- as.factor(merge$img)
+merge$word_label <- as.factor(merge$word_label)
+merge$lq_freq <- as.numeric(merge$lq_freq)
+merge$ID <- as.factor(merge$ID)
+merge$word <- as.factor(merge$word)
+```
+
+
+```{r Making a dataframe for the people in the scanner}
+only_scanner <- filter(merge, ID %in% c("Roberta", "2019102101", "2019102103", "2019102102", "2019102204", "2019102205", "2019102206", "2019102307", "2019102308"))
+newconc <- subset(only_scanner, Concrete == 1)
+newabst <- subset(only_scanner, Concrete == 0)
+```
+
+```{r making models for people in the scanner}
+model_OS <- lme(rt ~ Concrete, data = only_scanner, random = ~1|ID/word, method = "ML")
+model_OS1 <- lme(rt ~ super, data = only_scanner, random = ~1|ID/word, method = "ML")
+conmodel <- lme(rt ~ img, data = newconc, random = ~1|ID/word, method = "ML")
+anova(model_OS,model_OS1) #Comparing models
+
+summary(model_OS)
+```
+
+```{r Making models for everyone}
+model <- lme(rt ~ 1, data = merge, random = ~1|ID/word, method = "ML")
+model1 <- lme(rt ~ Concrete, data = merge, random = ~1|ID/word, method = "ML")
+model2 <- lme(rt ~ img, data = merge, random = ~1|ID/word, method = "ML")
+model3 <- lme(rt ~ super, data = only_scanner, random = ~1|ID/word, method = "ML")
+anova(model, model2)
+
+summary(model1)
+```
+
+
+```{r plot for people in scanner}
+
+only_scanner$`Super Category` <- factor(only_scanner$`Super Category`, levels = c("abstract action", "abstract entity", "abstract property", "mental entity", "artifact", "event", "living object", "natural object", "physical action", "physical property"))
+
+only_scanner$super <- only_scanner$`Super Category` #calling the column super for the sake of ggplot
+
+ggplot(only_scanner, aes(super, rt, colour = Concrete, fill = Concrete)) +
+        geom_bar(stat = 'summary', fun.y = mean, width = 0.2) + 
+        geom_errorbar(stat = 'summary', fun.data = mean_se, width = 0.1, colour = 'black') +
+                  labs(x = "Subcategories") + 
+                  labs(y = "Reaction Time") + 
+                  labs(title = "Reaction time and concreteness") + 
+                  ylim(0,0.65) + 
+                  rotate_x_text() + 
+                  facet_grid(.~only_scanner$Concrete, scales = "free_x", space = "free")
+
+```
+
+```{r Main effect of concrete words for people in the scanner only}
+
+ggline(only_scanner,
+      x = "Concrete",
+      y = "rt",
+      add = c("mean_se", "dodge"),
+      palette = "jco",
+      ggtheme = theme_pubr(),
+      xlab = "Concreteness of Words",
+      ylab = "Reaction Time",
+      shape = 19,
+      size = 0.5,
+      point.size = 0.01)
+
+```
+
+
+
+```{r Main effect of concrete words for whole sample size = 65}
+ggline(merge,
+      x = "Concrete",
+      y = "rt",
+      add = c("mean_se", "dodge"),
+      palette = "jco",
+      ggtheme = theme_pubr(),
+      xlab = "Concreteness of Words",
+      ylab = "Reaction Time",
+      shape = 19,
+      size = 0.5,
+      point.size = 0.01,
+      ylim = c(0.535, 0.58))
+```
+
+```{r Making names so the plot is easier to read}
+merge$img <- ifelse(merge$img == "image_stim_n.png", "Fearful Image", "Positive Image") #ONLY RUN THIS COMMAND ONCE
+```
+
+
+```{r interaction effect of different visual stimuli}
+ggline(merge,
+      x = "img",
+      y = "rt",
+      col = "Concrete",
+      add = c("mean_se", "dodge"),
+      palette = "jco",
+      ggtheme = theme_pubr(),
+      xlab = "Image Stimuli",
+      ylab = "Reaction Time",
+      shape = 19,
+      size = 0.5,
+      point.size = 0.01,
+      ylim = c(0.535, 0.58))
+
+```
+
+```{r}
+newconc <- subset(merge, Concrete == 1)
+
+ggline(newconc,
+      x = "img",
+      y = "rt",
+      add = c("mean_se", "dodge"),
+      palette = "jco",
+      ggtheme = theme_pubr(),
+      xlab = "Concreteness of Words",
+      ylab = "Reaction Time",
+      shape = 19,
+      size = 0.5,
+      point.size = 0.01)
+
+```
+
+
+```{r main effect of gender}
+ggline(merge,
+      x = "word_label",
+      y = "rt",
+      col = 'gender',
+      add = c("mean_se", "dodge"),
+      palette = "jco")
+```
+
+
