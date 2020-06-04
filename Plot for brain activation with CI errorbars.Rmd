@@ -1,0 +1,60 @@
+---
+title: "Untitled"
+author: "Lasse Hansen"
+date: "6/3/2020"
+output: html_document
+---
+
+```{r}
+library(reshape)
+jesp <- read_xls("abs1.xls")
+jesp <- as.data.frame(jesp)
+
+jesp$Value <- ifelse(jesp$Area == "LIFG", jesp$Value*-1, jesp$Value)
+
+jespnewnew <- melt.data.frame(jesp)
+
+jespnewnew$Area <- ifelse(jespnewnew$Area == "Precuneus", "L Precuneus", "LIFG")
+
+jespnewnew$variable <- ifelse(jespnewnew$Area == "LIFG", "Abstract > Concrete", "Concrete > Abstract")
+
+jespn <- jespnewnew[-c(55:108),]
+jespnn <- jespn[-c(54:107),]
+jespnnn <- jespnn[-c(54),]
+
+
+jespnnn$sd <- sd(jespnnn$value)
+
+pacman::p_load(Rmisc)
+
+newj <- summarySE(jespnnn, measurevar="len", groupvars=c("Area"))
+
+jespnnn$Area <- as.factor(jespnnn$Area)
+
+jespnnn %>% group_by(Area) %>% summarize(m = mean(value), sd = sd(value))
+
+
+```
+
+```{r}
+ggplot(jespnnn, aes(Area, value, colour = Area, fill = Area)) +
+  geom_bar(position = position_dodge(), stat = 'identity', width = 0.3) + 
+  geom_errorbar(aes(ymin = value-ci, ymax = value+ci), width = 0.1, colour = 'black') + 
+    labs(y = "Average Percent Signal Change") + labs(x = "Brain area") +
+    labs(title = "Activation for Abstract > Concrete in the LIFG and precuneus") + 
+    rotate_x_text() + 
+    facet_grid(~jespnnn$variable, scales = "free_x") + 
+    theme(axis.text.x = element_blank(), legend.title = element_blank(), strip.text.x = element_text(vjust = 0))  
+```
+
+```{r}
+ggplot(jespnewnew, aes(Area, value, colour = Area, fill = Area)) +
+  geom_bar(stat = 'summary', fun.y = mean, width = 0.3) + 
+  stat_summary(fun.data = mean_cl_normal, geom = "errorbar", width = 0.1, colour = 'black') + 
+    labs(y = "Average Percent Signal Change") + labs(x = "Contrast") +
+    labs(title = "Activation for the LIFG and L precuneus") + 
+    rotate_x_text() + 
+    facet_grid(~jespnewnew$variable, scales = "free_x") + 
+    theme(axis.text.x = element_blank(), legend.title = element_blank(), strip.text.x = element_text(vjust = 0))  
+```
+
